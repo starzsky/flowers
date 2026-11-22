@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Bouquet</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:#0c0e1a;user-select:none;-webkit-user-select:none;touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hint{position:fixed;left:0;right:0;top:3%;text-align:center;font:12px ui-monospace,monospace;color:#ffb8d2;opacity:.6;pointer-events:none;transition:opacity .8s}
+body.lagu #hint{opacity:0}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hint">tap layar buat mulai lagu ♪ · geser buat muter</div>
+
+<script>
+/* ====== UBAH DI SINI ====== */
+const MESSAGE = "for you ♥";                 // tulisan di bawah buket
+const HINT = "@alishsharma on tiktok!";      // tulisan kecil paling bawah (kosongin "" kalau mau dihapus)
+const LAGU = "assets/lagu.mp3";              // lagu di folder assets (huruf besar/kecil harus sama!)
+const UKURAN_HURUF = 1;                      // 1 = kecil & halus, 1.5 = sedang, 2 = besar & kasar
+/* ========================== */
+
+/* ---- Pengaturan (dari kode Python asli) ---- */
+const FPS = 24, SPIN_SPEED = 0.6, TILT = 0.30, CAM_DIST = 4.0, NUM_HEARTS = 18;
+const WHITE=[244,248,251,254,255,231], PINK=[125,162,168,205,211,218,225], RED=[52,88,124,160,196,203];
+const PURPLE=[54,91,97,134,140,183], YELLOW=[136,178,214,220,226,229], ORANGE=[130,166,202,208,214,216];
+const GOLD_CENTER=[94,136,178,214,220], DARK_CENTER=[52,58,94,130,136];
+const GREENS=[22,28,28,34,35,71,77,114], PAPER=[101,144,187,223,230,231], RIBBON=[88,125,161,197,204,211];
+const HEART_COLORS=[161,197,204,205,211,218], MSG_COLORS=[161,168,205,211,218,225,218,211,205,168];
+const SHADE=".:-=+*%@", PETAL_SHADE="+*#%", PIVOT_Y=0.2;
+const DISC_TYPES=[[WHITE,GOLD_CENTER,13],[PINK,GOLD_CENTER,8],[RED,DARK_CENTER,6],[PURPLE,GOLD_CENTER,7],[YELLOW,DARK_CENTER,12],[ORANGE,DARK_CENTER,9]];
+const TULIP_COLORS=[RED,PINK,YELLOW];
+
+let [LX,LY,LZ]=[-0.45,0.6,0.66]; { const n=Math.hypot(LX,LY,LZ); LX/=n; LY/=n; LZ/=n; }
+
+/* ---- Warna terminal 256 -> CSS ---- */
+function xterm(n){
+  if(n<16){ return `rgb(${[[0,0,0],[205,0,0],[0,205,0],[205,205,0],[0,0,238],[205,0,205],[0,205,205],[229,229,229],[127,127,127],[255,0,0],[0,255,0],[255,255,0],[92,92,255],[255,0,255],[0,255,255],[255,255,255]][n]})`; }
+  if(n<232){ n-=16; const L=[0,95,135,175,215,255]; return `rgb(${L[Math.floor(n/36)]},${L[Math.floor(n/6)%6]},${L[n%6]})`; }
+  const g=8+(n-232)*10; return `rgb(${g},${g},${g})`;
+}
+const COL = Array.from({length:256},(_,i)=>xterm(i));
+
+/* ---- Alat bantu ---- */
+function mulberry32(a){return ()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const norm = v => { const m=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/m,v[1]/m,v[2]/m]; };
+const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const addv = (p,d,k) => [p[0]+d[0]*k, p[1]+d[1]*k, p[2]+d[2]*k];
+const pick = a => a[Math.floor(Math.random()*a.length)];
+const uni = (a,b) => a + Math.random()*(b-a);
+
+/* ---- Bikin buketnya (sama kayak build_scene di Python) ---- */
+function buildScene(){
+  const rr = mulberry32(21), rnd = ()=>rr(), uniform=(a,b)=>a+(b-a)*rnd();
+  const pts=[], neck=[0,-0.12,0];
+  const C=[0,0.12,0], D=0.64, N=10, golden=Math.PI*(3-Math.sqrt(5));
+  const heads=[];
+  for(let i=0;i<N;i++){
+    const el=(88-60*Math.sqrt(i/(N-1)))*Math.PI/180, az=i*golden;
+    const d=[Math.cos(el)*Math.cos(az), Math.sin(el), Math.cos(el)*Math.sin(az)];
+    heads.push([addv(C,d,D*uniform(0.92,1.05)), norm(d)]);
+  }
+  const tulipSlots=[3,8], flowers=[]; let discI=0;
+  heads.forEach(([pos,axis],idx)=>{
+    const base=addv(pos,axis,-0.03);
+    for(let j=0;j<70;j++){                      // tangkai
+      const t=j/69;
+      pts.push([base[0]+(neck[0]-base[0])*t, base[1]+(neck[1]-base[1])*t, base[2]+(neck[2]-base[2])*t,
+                axis[0],0,axis[2],GREENS,-0.15,true,null]);
+    }
+    if(tulipSlots.includes(idx)){
+      const nT=tulipSlots.filter(k=>k<idx).length;
+      flowers.push({pos,kind:'tulip',pal:TULIP_COLORS[nT%3],cpal:null,nPet:0,R:0.11,seed:uniform(0,6.28)});
+    } else {
+      const [petals,center,nPet]=DISC_TYPES[discI%DISC_TYPES.length]; discI++;
+      flowers.push({pos,kind:'disc',pal:petals,cpal:center,nPet,R:uniform(0.12,0.14),seed:uniform(0,6.28)});
+    }
+  });
+
+  for(let i=0;i<8;i++){                         // daun
+    const a=(i+0.4)/8*2*Math.PI, c=Math.cos(a), s=Math.sin(a);
+    const base=[0.26*c,0.30,0.26*s], d=norm([c,0.15,s]), side=[-s,0,c], n=norm(cross(side,d));
+    const L=0.30, W=0.07;
+    for(let ti=0;ti<32;ti++){
+      const t=ti/31;
+      for(let wi=-5;wi<=5;wi++){
+        const w=wi/5, curl=0.025*w*w, sw=W*Math.sin(Math.PI*t)*w;
+        pts.push([base[0]+d[0]*L*t+side[0]*sw+n[0]*curl,
+                  base[1]+d[1]*L*t-0.10*t*t+n[1]*curl,
+                  base[2]+d[2]*L*t+side[2]*sw+n[2]*curl,
+                  n[0],n[1],n[2],GREENS,wi===0?-0.25:0,true,null]);
+      }
+    }
+  }
+
+  const y0=-0.20,y1=0.30,r0=0.06,r1=0.36,k=(r1-r0)/(y1-y0), rings=50;   // kertas pembungkus
+  for(let i=0;i<rings;i++){
+    const t=i/(rings-1), r=r0+(r1-r0)*t, count=Math.max(8,Math.trunc(170*r));
+    for(let j=0;j<count;j++){
+      const ph=(j+rnd())/count*2*Math.PI, c=Math.cos(ph), s=Math.sin(ph);
+      let y=y0+(y1-y0)*t;
+      if(t>0.9) y+=0.03*Math.sin(9*ph);
+      const fold=0.3*(Math.abs(Math.sin(5*ph))-0.6), nn=norm([c,-k,s]);
+      pts.push([r*c,y,r*s,nn[0],nn[1],nn[2],PAPER,fold,false,null]);
+    }
+  }
+  for(let i=0;i<7;i++){                         // tangkai bawah
+    const a=i/7*2*Math.PI, sx=0.025*Math.cos(a), sz=0.025*Math.sin(a);
+    for(let j=0;j<40;j++){
+      const t=j/39;
+      pts.push([sx*(1+1.2*t),-0.20-0.30*t,sz*(1+1.2*t),Math.cos(a),0,Math.sin(a),GREENS,-0.1,true,null]);
+    }
+  }
+
+  const by=-0.12, br=r0+k*(by-y0)+0.01;         // pita
+  for(let j=0;j<90;j++){
+    const ph=j/90*2*Math.PI;
+    for(const dy of [-0.012,0,0.012])
+      pts.push([br*Math.cos(ph),by+dy,br*Math.sin(ph),Math.cos(ph),0,Math.sin(ph),RIBBON,0,false,null]);
+  }
+  const knot=[0,by,br+0.01];
+  for(const side of [-1,1]){
+    for(let j=0;j<70;j++){
+      const a=j/70*2*Math.PI, lx=side*(0.07+0.07*Math.cos(a));
+      const ly=0.04*Math.sin(a)+0.02*(0.07+0.07*Math.cos(a))/0.14;
+      for(const fill of [1.0,0.7])
+        pts.push([knot[0]+lx*fill,knot[1]+ly*fill,knot[2]+0.01,side*0.3,0.2,0.93,RIBBON,0.1,true,null]);
+    }
+    for(let j=0;j<30;j++){
+      const t=j/29;
+      pts.push([knot[0]+side*0.06*t,knot[1]-0.15*t,knot[2]+0.015,side*0.2,0,0.98,RIBBON,-0.05+0.05*Math.sin(t*9),true,null]);
+    }
+  }
+  for(const dx of [-0.01,0,0.01]) pts.push([dx,by,knot[2]+0.02,0,0,1,RIBBON,0.2,true,'@']);
+
+  const babies=[];                               // bunga kecil (baby's breath)
+  for(let i=0;i<90;i++){
+    const a=rnd()*2*Math.PI, el=uniform(0.3,1.4), r=uniform(0.40,0.58);
+    babies.push([r*Math.cos(a)*Math.cos(el), C[1]+r*Math.sin(el), r*Math.sin(a)*Math.cos(el), uniform(0,6.28)]);
+  }
+  const sparkles=[];
+  for(let i=0;i<30;i++){
+    const a=rnd()*2*Math.PI, r=uniform(0.75,0.95);
+    sparkles.push([r*Math.cos(a),uniform(-0.3,1.0),r*Math.sin(a),uniform(0,6.28),uniform(1.5,4.0)]);
+  }
+  return {pts,flowers,babies,sparkles};
+}
+
+function updateHearts(hearts,dt){
+  while(hearts.length<NUM_HEARTS)
+    hearts.push([Math.random(),1+Math.random(),uni(0.03,0.08),uni(0,6.28),pick(HEART_COLORS)]);
+  for(const h of hearts){
+    h[1]-=h[2]*dt;
+    if(h[1]<0){ h[0]=Math.random(); h[1]=1; h[4]=pick(HEART_COLORS); }
+  }
+}
+
+/* ---- Canvas & grid karakter ---- */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let W,H,fs,cw,chh,cols,rows,chars,colors,zbuf;
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+  fs=Math.min(28,Math.max(9,W/39.6*UKURAN_HURUF));      // ukuran huruf
+  cw=fs*0.6; chh=fs*1.2;                   // sel = lebar 1 : tinggi 2 kayak terminal
+  cols=Math.max(20,Math.floor(W/cw)); rows=Math.max(12,Math.floor(H/chh));
+  chars=new Array(cols*rows); colors=new Int16Array(cols*rows); zbuf=new Float32Array(cols*rows);
+}
+addEventListener('resize',resize); resize();
+
+let PC,PR,PZ,PF;
+function render(scene,t,extraAng,hearts){
+  const {pts,flowers,babies,sparkles}=scene;
+  chars.fill(' '); colors.fill(0); zbuf.fill(-1e9);
+
+  const viewRows=rows-2;
+  const scale=Math.max(1,Math.min((viewRows-2)/1.45,(cols-2)/2.7));
+  const sxScale=scale*2;
+  const yoff=Math.max(0,Math.floor((viewRows-(1.45*scale+4))/2));   // taruh buket di tengah layar
+  const cx=cols/2, cy=1+0.78*scale+yoff;
+
+  const ang=t*SPIN_SPEED+extraAng, ca=Math.cos(ang), sa=Math.sin(ang), ct=Math.cos(TILT), st=Math.sin(TILT);
+
+  function project(x,y,z){
+    const xr=x*ca-z*sa, zr=x*sa+z*ca, yp=y-PIVOT_Y, yt=yp*ct-zr*st, zt=yp*st+zr*ct;
+    const f=CAM_DIST/(CAM_DIST-zt);
+    PC=Math.trunc(cx+xr*f*sxScale); PR=Math.trunc(cy-yt*f*scale); PZ=zt; PF=f;
+    PX=cx+xr*f*sxScale; PY=cy-yt*f*scale;
+  }
+  let PX,PY;
+  function plot(col,row,z,ch,color){
+    if(row>=0&&row<viewRows&&col>=0&&col<cols){
+      const i=row*cols+col;
+      if(z>zbuf[i]){ zbuf[i]=z; chars[i]=ch; colors[i]=color; }
+    }
+  }
+
+  for(const [x,y,,phase,color] of hearts){      // hati jatuh di latar
+    let col=Math.trunc((x+0.015*Math.sin(t*1.2+phase))*cols); col=((col%cols)+cols)%cols;
+    plot(col,Math.trunc(y*viewRows),-50,'♥',color);
+  }
+
+  for(const [x,y,z,nx,ny,nz,pal,tone,twoSided,override] of pts){
+    project(x,y,z);
+    const nxr=nx*ca-nz*sa, nzr=nx*sa+nz*ca, nyt=ny*ct-nzr*st, nzt=ny*st+nzr*ct;
+    let dot=nxr*LX+nyt*LY+nzt*LZ;
+    if(twoSided&&dot<0) dot=-dot*0.55;
+    let b=0.25+0.75*Math.max(0,dot)+tone;
+    b=Math.min(0.999,Math.max(0,b));
+    const ch=override==='P'?PETAL_SHADE[Math.floor(b*PETAL_SHADE.length)]:(override||SHADE[Math.floor(b*SHADE.length)]);
+    plot(PC,PR,PZ,ch,pal[Math.floor(b*pal.length)]);
+  }
+
+  for(const fl of flowers){
+    project(fl.pos[0],fl.pos[1],fl.pos[2]);
+    const fx=PX, fy=PY, zt=PZ, f=PF, {kind,pal,cpal,nPet,R,seed}=fl;
+    const rx=R*f*sxScale, ry=R*f*scale;
+    const dim=-0.4*(1-Math.min(1,Math.max(0,(zt+0.6)/1.2)));
+    const rot=seed+ang*0.7;
+    for(let row=Math.trunc(fy-ry)-1; row<Math.trunc(fy+ry)+2; row++){
+      const dy=(row+0.5-fy)/ry;
+      for(let col=Math.trunc(fx-rx)-1; col<Math.trunc(fx+rx)+2; col++){
+        const dx=(col+0.5-fx)/rx;
+        if(kind==='disc'){
+          const s=Math.sqrt(dx*dx+dy*dy);
+          if(s>1) continue;
+          if(s<0.3){
+            let b=0.55-0.35*dx-0.35*dy+dim; b=Math.min(0.999,Math.max(0,b));
+            plot(col,row,zt+0.06,s<0.17?'@':'o',cpal[Math.floor(b*cpal.length)]);
+            continue;
+          }
+          const ph=Math.atan2(dy,dx);
+          const reach=0.32+0.68*Math.pow(Math.abs(Math.cos(nPet*(ph+rot)/2)),0.7);
+          if(s>reach) continue;
+          const edge=s>reach-0.14?-0.22:0;
+          let b=0.62-0.22*dx-0.28*dy+0.12*s+edge+dim; b=Math.min(0.999,Math.max(0,b));
+          plot(col,row,zt+0.04*(1-s),PETAL_SHADE[Math.floor(b*PETAL_SHADE.length)],pal[Math.floor(b*pal.length)]);
+        } else {
+          const v=(1-dy)/2;
+          if(v<0||v>1) continue;
+          const hw=0.62*Math.sin(Math.PI*0.5*Math.min(1,v*1.5+0.05));
+          if(hw<=0||Math.abs(dx)>hw) continue;
+          const xn=dx/hw;
+          if(v>0.72+0.28*Math.pow(Math.cos(1.5*Math.PI*xn),2)) continue;
+          const seam=(Math.abs(Math.abs(xn)-0.33)<0.12&&v>0.3)?-0.25:0;
+          let b=0.55-0.3*xn+0.1*v+seam+dim; b=Math.min(0.999,Math.max(0,b));
+          plot(col,row,zt+0.03,PETAL_SHADE[Math.floor(b*PETAL_SHADE.length)],pal[Math.floor(b*pal.length)]);
+        }
+      }
+    }
+  }
+
+  for(const [x,y,z,phase] of babies){
+    project(x,y,z);
+    const star=Math.sin(t*2+phase)>0.6;
+    plot(PC,PR,PZ+0.02,star?'*':'·',star?231:255);
+  }
+  for(const [x,y,z,phase,speed] of sparkles){
+    project(x,y,z);
+    const tw=Math.sin(t*speed+phase);
+    if(tw>0.85) plot(PC,PR,PZ,'*',231);
+    else if(tw>0.4) plot(PC,PR,PZ,'+',225);
+    else if(tw>0) plot(PC,PR,PZ,'·',218);
+  }
+
+  // tulisan di bawah buket
+  const mrow=Math.min(rows-2,Math.trunc(cy+0.7*scale)+3);
+  const start=Math.max(0,Math.floor((cols-MESSAGE.length)/2)), shift=Math.trunc(t*6);
+  [...MESSAGE].forEach((ch,i)=>{
+    if(start+i<cols){ chars[mrow*cols+start+i]=ch; colors[mrow*cols+start+i]=MSG_COLORS[(i+shift)%MSG_COLORS.length]; }
+  });
+  const hs=Math.max(0,Math.floor((cols-HINT.length)/2));
+  [...HINT].forEach((ch,i)=>{
+    if(hs+i<cols){ chars[(rows-1)*cols+hs+i]=ch; colors[(rows-1)*cols+hs+i]=238; }
+  });
+
+  // gambar grid ke canvas
+  ctx.clearRect(0,0,W,H);
+  ctx.font=`${fs}px "DejaVu Sans Mono",Menlo,Consolas,monospace`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  let last=-1;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const i=r*cols+c, ch=chars[i];
+      if(ch===' ') continue;
+      if(colors[i]!==last){ last=colors[i]; ctx.fillStyle=COL[last]; }
+      ctx.fillText(ch,c*cw+cw/2,r*chh+chh/2);
+    }
+  }
+}
+
+/* ---- Loop animasi ---- */
+const scene=buildScene(), hearts=[];
+let extraAng=0, drag=false, lastX=0;
+addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;});
+addEventListener('pointermove',e=>{if(drag){extraAng+=(e.clientX-lastX)*.01;lastX=e.clientX;}});
+['pointerup','pointercancel'].forEach(ev=>addEventListener(ev,()=>drag=false));
+
+const t0=performance.now(); let lastT=t0, lastDraw=0;
+function frame(now){
+  if(now-lastDraw>=1000/FPS-2){
+    const dt=(now-lastT)/1000; lastT=now; lastDraw=now;
+    updateHearts(hearts,dt);
+    render(scene,(now-t0)/1000,extraAng,hearts);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---- Lagu: mulai pas jari diangkat (browser HP nggak izinin autoplay) ---- */
+const musik=new Audio(LAGU);
+musik.loop=true; musik.volume=0.7;
+function mulaiLagu(){
+  musik.play().then(()=>{
+    document.body.classList.add('lagu');
+    ['pointerup','touchend','click'].forEach(ev=>removeEventListener(ev,mulaiLagu));
+  }).catch(err=>console.log('Lagu belum bisa diputar:',err));
+}
+['pointerup','touchend','click'].forEach(ev=>addEventListener(ev,mulaiLagu));
+</script>
+</body>
+</html>
